@@ -12,7 +12,6 @@ var key = "sb_publishable_8Gsb8EIxBukAq-xf6w5w3w_bFwATpUe";
 var options = new SupabaseOptions { AutoConnectRealtime = true };
 builder.Services.AddSingleton(new Supabase.Client(url, key, options));
 
-// Configuração de CORS para permitir que o React converse com a API
 builder.Services.AddCors(options => options.AddDefaultPolicy(p => p.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
@@ -23,20 +22,18 @@ app.MapPost("/inscrever", async (Supabase.Client supabase, CandidatoRequest requ
 {
     try
     {
-        // 1. Converter os dados simples do React para o Modelo do Supabase
         var novoCandidato = new Candidato 
         {
             Nome = request.Nome,
             Telefone = request.Telefone,
             Unidade = request.Unidade,
             Email = request.Email,
-            Validado = false // Por padrão, entra como não validado
+            FotoUrl = request.FotoUrl, // AJUSTE 1: Adicionado para receber a URL da foto do React
+            Validado = false 
         };
 
-        // 2. SALVAR NO BANCO (SUPABASE)
         await supabase.From<Candidato>().Insert(novoCandidato);
 
-        // 3. DISPARAR E-MAIL DE CONFIRMAÇÃO
         var mensagem = new MimeMessage();
         mensagem.From.Add(new MailboxAddress("MerendaChef", "lucasds151@gmail.com"));
         mensagem.To.Add(new MailboxAddress(novoCandidato.Nome, novoCandidato.Email));
@@ -58,14 +55,13 @@ app.MapPost("/inscrever", async (Supabase.Client supabase, CandidatoRequest requ
     catch (Exception ex) { return Results.Problem(ex.Message); }
 });
 
-// --- ROTA 2: LISTAR CANDIDATOS (PARA A TELA DE GESTÃO) ---
+// --- ROTA 2: LISTAR CANDIDATOS ---
 app.MapGet("/candidatos", async (Supabase.Client supabase) =>
 {
     try
     {
         var resultado = await supabase.From<Candidato>().Get();
         
-        // Mapeia os dados do Supabase para um objeto simples que o conversor JSON entenda
         var candidatosLimpos = resultado.Models.Select(c => new {
             id = c.Id,
             createdAt = c.CreatedAt,
@@ -73,7 +69,8 @@ app.MapGet("/candidatos", async (Supabase.Client supabase) =>
             telefone = c.Telefone,
             unidade = c.Unidade,
             email = c.Email,
-            validado = c.Validado
+            validado = c.Validado,
+            fotoUrl = c.FotoUrl // AJUSTE 2: Adicionado para que a foto apareça na Dashboard
         });
 
         return Results.Ok(candidatosLimpos);
@@ -81,12 +78,11 @@ app.MapGet("/candidatos", async (Supabase.Client supabase) =>
     catch (Exception ex) { return Results.Problem(ex.Message); }
 });
 
-// --- ROTA 3: VALIDAR CANDIDATO (CHECKBOX NA DASHBOARD) ---
+// --- ROTA 3: VALIDAR CANDIDATO ---
 app.MapPost("/validar", async (Supabase.Client supabase, ValidarRequest request) =>
 {
     try
     {
-        // Usa o método Set() para atualizar apenas a coluna "Validado", sem precisar do objeto completo
         await supabase.From<Candidato>()
                       .Where(x => x.Email == request.Email)
                       .Set(x => x.Validado, request.Validado)
@@ -97,19 +93,44 @@ app.MapPost("/validar", async (Supabase.Client supabase, ValidarRequest request)
     catch (Exception ex) { return Results.Problem(ex.Message); }
 });
 
+// --- ROTA 4: LOGIN DE USUÁRIOS ---
+app.MapPost("/login", async (Supabase.Client supabase, LoginRequest request) =>
+{
+    try
+    {
+        // Busca no banco se existe alguém com esse e-mail E senha
+        var resposta = await supabase.From<Usuario>()
+                                     .Where(x => x.Email == request.Email && x.Senha == request.Senha)
+                                     .Get();
+
+        var usuario = resposta.Models.FirstOrDefault();
+
+        if (usuario == null)
+        {
+            return Results.BadRequest("E-mail ou senha incorretos.");
+        }
+
+        // Se achou, devolve o perfil e o nome para o React
+        return Results.Ok(new { 
+            perfil = usuario.Perfil, 
+            nome = usuario.Nome, 
+            email = usuario.Email 
+        });
+    }
+    catch (Exception ex) { return Results.Problem(ex.Message); }
+});
+
 app.Run();
 
-// ======================================================================
-// CLASSES DE APOIO
-// ======================================================================
+// --- CLASSES DE APOIO ---
 
-// --- DTOs: Classes simples para receber os dados do Frontend via JSON ---
 public class CandidatoRequest 
 {
     public string Nome { get; set; }
     public string Telefone { get; set; }
     public string Unidade { get; set; }
     public string Email { get; set; }
+    public string? FotoUrl { get; set; } // AJUSTE 3: Campo necessário para o JSON do React
 }
 
 public class ValidarRequest
@@ -118,7 +139,6 @@ public class ValidarRequest
     public bool Validado { get; set; }
 }
 
-// --- MODELO DE DADOS: Mapeia estritamente a tabela do Supabase ---
 [Table("candidatos")] 
 public class Candidato : BaseModel
 {
@@ -142,4 +162,23 @@ public class Candidato : BaseModel
 
     [Column("Validado")]
     public bool Validado { get; set; }
+
+    [Column("FotoUrl")]
+    public string? FotoUrl { get; set; }
+}
+
+public class LoginRequest 
+{
+    public string Email { get; set; }
+    public string Senha { get; set; }
+}
+
+[Table("usuarios")]
+public class Usuario : BaseModel
+{
+    [PrimaryKey("id", false)] public int Id { get; set; }
+    [Column("email")] public string Email { get; set; }
+    [Column("senha")] public string Senha { get; set; }
+    [Column("perfil")] public string Perfil { get; set; }
+    [Column("nome")] public string Nome { get; set; }
 }
