@@ -19,4 +19,5 @@ EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
 
 # Comando para iniciar a API
-ENTRYPOINT ["dotnet", "PrototipoBackend.dll"]
+# O nome do arquivo .dll DEVE ser o mesmo nome do seu projeto .csproj
+ENTRYPOINT ["dotnet", "Teste_Email.dll"]
