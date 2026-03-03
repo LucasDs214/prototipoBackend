@@ -1,5 +1,5 @@
-# Usamos a imagem do SDK do .NET 8 para compilar o código
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build-env
+# Usamos a imagem do SDK do .NET 9.0 para compilar o código
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build-env
 WORKDIR /App
 
 # Copia os arquivos e restaura as dependências
@@ -9,8 +9,8 @@ RUN dotnet restore
 # Compila o projeto em modo Release
 RUN dotnet publish -c Release -o out
 
-# Cria a imagem final usando apenas o necessário para rodar (fica mais leve)
-FROM mcr.microsoft.com/dotnet/aspnet:8.0
+# Cria a imagem final usando apenas o necessário para rodar
+FROM mcr.microsoft.com/dotnet/aspnet:9.0
 WORKDIR /App
 COPY --from=build-env /App/out .
 
@@ -18,5 +18,6 @@ COPY --from=build-env /App/out .
 EXPOSE 8080
 ENV ASPNETCORE_URLS=http://+:8080
 
-# Comando para iniciar a API (verifique se o nome do seu .dll é esse mesmo)
-ENTRYPOINT ["dotnet", "PrototipoBackend.dll"]
+# Comando para iniciar a API
+# O nome do arquivo .dll DEVE ser o mesmo nome do seu projeto .csproj
+ENTRYPOINT ["dotnet", "Teste_Email.dll"]
