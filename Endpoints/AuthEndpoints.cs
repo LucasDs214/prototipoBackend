@@ -66,10 +66,11 @@ public static class AuthEndpoints
                 };
 
                 using var client = new SmtpClient();
+                client.Timeout = 15000;
                 client.ServerCertificateValidationCallback = (s, c, h, e) => true;
                 
                 // CORREÇÃO 1: Usar SecureSocketOptions.StartTls em vez de 'false'
-                await client.ConnectAsync("smtp.gmail.com", 587, SecureSocketOptions.StartTls);
+                await client.ConnectAsync("smtp.gmail.com", 465, SecureSocketOptions.SslOnConnect);
                 
                 // CORREÇÃO 2: Passar as credenciais puxadas do Render
                 await client.AuthenticateAsync(emailRemetente, senhaApp);
