@@ -1,8 +1,7 @@
 using PrototipoBackend.Models;
 using PrototipoBackend.DTOs;
-using MimeKit;
-using MailKit.Net.Smtp;
-using MailKit.Security; // Adicionado para a segurança TLS
+using System.Text.Json; // Adicionado para a API do Resend
+using System.Text;      // Adicionado para a API do Resend
 
 namespace PrototipoBackend.Endpoints;
 
@@ -31,7 +30,7 @@ public static class AuthEndpoints
             catch (Exception ex) { return Results.Problem(ex.Message); }
         });
 
-        // --- 2. NOVA ROTA: ESQUECI MINHA SENHA (CORRIGIDA PARA A NUVEM) ---
+        // --- 2. NOVA ROTA: ESQUECI A MINHA SENHA (COM RESEND API) ---
         app.MapPost("/esqueci-senha", async (Supabase.Client supabase, EsqueciSenhaRequest request) =>
         {
             try
@@ -51,40 +50,46 @@ public static class AuthEndpoints
                               .Set(x => x.SenhaTemporaria, true)
                               .Update();
 
-                // Envia o e-mail
-                var mensagem = new MimeMessage();
+                // Puxa a chave do Resend do Render
+                var resendApiKey = Environment.GetEnvironmentVariable("Resend__ApiKey");
                 
-                // Lê o e-mail configurado no Render. Se não achar, usa o teu por defeito.
-                var emailRemetente = Environment.GetEnvironmentVariable("EmailConfig__Email") ?? "lucasds151@gmail.com";
-                var senhaApp = Environment.GetEnvironmentVariable("EmailConfig__Senha") ?? "svaiojacveepmiis";
+                if (string.IsNullOrEmpty(resendApiKey)) 
+                    return Results.Problem("A chave da API do Resend não foi configurada no Render.");
 
-                mensagem.From.Add(new MailboxAddress("MerendaChef", emailRemetente));
-                mensagem.To.Add(new MailboxAddress(usuario.Nome, usuario.Email)); 
-                mensagem.Subject = "Recuperação de Senha - MerendaChef";
-                mensagem.Body = new TextPart("html") { 
-                    Text = $"<h2>Olá, {usuario.Nome}</h2><p>Sua senha provisória é: <b>{senhaProvisoria}</b></p><p>Ao fazer o login, você deverá cadastrar uma nova senha.</p>" 
+                // --- NOVA LÓGICA DE ENVIO (HTTP POST NA PORTA 443) ---
+                using var httpClient = new HttpClient();
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {resendApiKey}");
+
+                var emailData = new
+                {
+                    from = "MerendaChef <onboarding@resend.dev>", // Obrigatório no plano grátis
+                    to = new[] { usuario.Email }, // TEM de ser o teu email cadastrado no Resend para funcionar
+                    subject = "Recuperação de Senha - MerendaChef",
+                    html = $"<h2>Olá, {usuario.Nome}</h2><p>A sua senha provisória é: <b>{senhaProvisoria}</b></p><p>Ao iniciar sessão, deverá registar uma nova senha.</p>"
                 };
 
-                using var client = new SmtpClient();
-                client.Timeout = 15000;
-                client.ServerCertificateValidationCallback = (s, c, h, e) => true;
-                
-                // CORREÇÃO 1: Usar SecureSocketOptions.StartTls em vez de 'false'
-                await client.ConnectAsync("smtp.gmail.com", 465, SecureSocketOptions.SslOnConnect);
-                
-                // CORREÇÃO 2: Passar as credenciais puxadas do Render
-                await client.AuthenticateAsync(emailRemetente, senhaApp);
-                
-                // CORREÇÃO 3: Operações Assíncronas
-                await client.SendAsync(mensagem);
-                await client.DisconnectAsync(true);
+                var content = new StringContent(JsonSerializer.Serialize(emailData), Encoding.UTF8, "application/json");
 
-                return Results.Ok("Uma senha provisória foi enviada para o seu e-mail cadastrado.");
+                // Faz a chamada à API do Resend (Nunca é bloqueada pelo Render)
+                var resendResponse = await httpClient.PostAsync("https://api.resend.com/emails", content);
+
+                if (!resendResponse.IsSuccessStatusCode)
+                {
+                    var erroResend = await resendResponse.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Erro Resend: {erroResend}");
+                    return Results.Problem("Ocorreu um erro ao enviar o e-mail pela API do Resend.");
+                }
+
+                return Results.Ok("Uma senha provisória foi enviada para o seu e-mail.");
             }
-            catch (Exception ex) { return Results.Problem(ex.Message); }
+            catch (Exception ex) 
+            { 
+                Console.WriteLine($"Erro crítico: {ex.Message}");
+                return Results.Problem($"Erro interno: {ex.Message}"); 
+            }
         });
 
-        // --- 3. NOVA ROTA: TROCAR SENHA PROVISÓRIA ---
+        // --- 3. NOVA ROTA: ALTERAR SENHA PROVISÓRIA ---
         app.MapPost("/trocar-senha", async (Supabase.Client supabase, TrocarSenhaRequest request) =>
         {
             try
@@ -100,7 +105,7 @@ public static class AuthEndpoints
             catch (Exception ex) { return Results.Problem(ex.Message); }
         });
 
-        // --- 4. REGISTRAR USUÁRIO COMUM (ADMIN/PROFESSORES) ---
+        // --- 4. REGISTAR UTILIZADOR COMUM (ADMIN/PROFESSORES) ---
         app.MapPost("/registrar-usuario", async (Supabase.Client supabase, RegistroRequest request) =>
         {
             try
@@ -113,7 +118,7 @@ public static class AuthEndpoints
                     Senha = BCrypt.Net.BCrypt.HashPassword(request.Senha) 
                 };
                 await supabase.From<Usuario>().Insert(novoUsuario);
-                return Results.Ok("Usuário cadastrado com sucesso!");
+                return Results.Ok("Utilizador registado com sucesso!");
             }
             catch (Exception ex) { return Results.Problem(ex.Message); }
         });
