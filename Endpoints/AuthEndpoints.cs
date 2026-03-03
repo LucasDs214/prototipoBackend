@@ -2,6 +2,7 @@ using PrototipoBackend.Models;
 using PrototipoBackend.DTOs;
 using MimeKit;
 using MailKit.Net.Smtp;
+using MailKit.Security; // Adicionado para a segurança TLS
 
 namespace PrototipoBackend.Endpoints;
 
@@ -9,7 +10,7 @@ public static class AuthEndpoints
 {
     public static void MapAuthEndpoints(this WebApplication app)
     {
-        // --- 1. LOGIN (Atualizado para CPF e Senha Temporária) ---
+        // --- 1. LOGIN ---
         app.MapPost("/login", async (Supabase.Client supabase, LoginRequest request) =>
         {
             try
@@ -20,7 +21,6 @@ public static class AuthEndpoints
                 if (usuario == null || !BCrypt.Net.BCrypt.Verify(request.Senha, usuario.Senha))
                     return Results.BadRequest("CPF ou senha incorretos.");
 
-                // Agora devolve o e-mail E o status da senha temporária para o React
                 return Results.Ok(new { 
                     perfil = usuario.Perfil, 
                     nome = usuario.Nome, 
@@ -31,7 +31,7 @@ public static class AuthEndpoints
             catch (Exception ex) { return Results.Problem(ex.Message); }
         });
 
-        // --- 2. NOVA ROTA: ESQUECI MINHA SENHA ---
+        // --- 2. NOVA ROTA: ESQUECI MINHA SENHA (CORRIGIDA PARA A NUVEM) ---
         app.MapPost("/esqueci-senha", async (Supabase.Client supabase, EsqueciSenhaRequest request) =>
         {
             try
@@ -53,7 +53,12 @@ public static class AuthEndpoints
 
                 // Envia o e-mail
                 var mensagem = new MimeMessage();
-                mensagem.From.Add(new MailboxAddress("MerendaChef", "lucasds151@gmail.com"));
+                
+                // Lê o e-mail configurado no Render. Se não achar, usa o teu por defeito.
+                var emailRemetente = Environment.GetEnvironmentVariable("EmailConfig__Email") ?? "lucasds151@gmail.com";
+                var senhaApp = Environment.GetEnvironmentVariable("EmailConfig__Senha") ?? "svaiojacveepmiis";
+
+                mensagem.From.Add(new MailboxAddress("MerendaChef", emailRemetente));
                 mensagem.To.Add(new MailboxAddress(usuario.Nome, usuario.Email)); 
                 mensagem.Subject = "Recuperação de Senha - MerendaChef";
                 mensagem.Body = new TextPart("html") { 
@@ -62,10 +67,16 @@ public static class AuthEndpoints
 
                 using var client = new SmtpClient();
                 client.ServerCertificateValidationCallback = (s, c, h, e) => true;
-                client.Connect("smtp.gmail.com", 587, false);
-                client.Authenticate("lucasds151@gmail.com", "svaiojacveepmiis"); // A senha de app do Google
-                client.Send(mensagem);
-                client.Disconnect(true);
+                
+                // CORREÇÃO 1: Usar SecureSocketOptions.StartTls em vez de 'false'
+                await client.ConnectAsync("smtp.gmail.com", 587, SecureSocketOptions.StartTls);
+                
+                // CORREÇÃO 2: Passar as credenciais puxadas do Render
+                await client.AuthenticateAsync(emailRemetente, senhaApp);
+                
+                // CORREÇÃO 3: Operações Assíncronas
+                await client.SendAsync(mensagem);
+                await client.DisconnectAsync(true);
 
                 return Results.Ok("Uma senha provisória foi enviada para o seu e-mail cadastrado.");
             }
@@ -77,7 +88,6 @@ public static class AuthEndpoints
         {
             try
             {
-                // Salva a nova senha e desliga a exigência de troca
                 await supabase.From<Usuario>()
                               .Where(x => x.Cpf == request.Cpf)
                               .Set(x => x.Senha, BCrypt.Net.BCrypt.HashPassword(request.NovaSenha))
@@ -123,7 +133,7 @@ public static class AuthEndpoints
 
                 var novoCandidato = new Candidato { 
                     Nome = request.Nome, 
-                    Cpf = request.Cpf, // CPF adicionado na ficha do candidato
+                    Cpf = request.Cpf,
                     Telefone = request.Telefone, 
                     Unidade = request.Unidade, 
                     Email = request.Email, 
