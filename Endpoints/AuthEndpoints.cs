@@ -1,7 +1,7 @@
 using PrototipoBackend.Models;
 using PrototipoBackend.DTOs;
-using System.Text.Json; // Adicionado para a API do Resend
-using System.Text;      // Adicionado para a API do Resend
+using System.Text.Json;
+using System.Text;
 
 namespace PrototipoBackend.Endpoints;
 
@@ -30,7 +30,7 @@ public static class AuthEndpoints
             catch (Exception ex) { return Results.Problem(ex.Message); }
         });
 
-        // --- 2. NOVA ROTA: ESQUECI A MINHA SENHA (COM RESEND API) ---
+        // --- 2. NOVA ROTA: ESQUECI A MINHA SENHA (AGORA COM A API DO BREVO) ---
         app.MapPost("/esqueci-senha", async (Supabase.Client supabase, EsqueciSenhaRequest request) =>
         {
             try
@@ -50,37 +50,41 @@ public static class AuthEndpoints
                               .Set(x => x.SenhaTemporaria, true)
                               .Update();
 
-                // Puxa a chave do Resend do Render
-                var resendApiKey = Environment.GetEnvironmentVariable("Resend__ApiKey");
+                // Puxa a chave do Brevo do Render
+                var brevoApiKey = Environment.GetEnvironmentVariable("Brevo__ApiKey");
                 
-                if (string.IsNullOrEmpty(resendApiKey)) 
-                    return Results.Problem("A chave da API do Resend não foi configurada no Render.");
+                if (string.IsNullOrEmpty(brevoApiKey)) 
+                    return Results.Problem("A chave da API do Brevo não foi configurada no Render.");
 
-                // --- NOVA LÓGICA DE ENVIO (HTTP POST NA PORTA 443) ---
+                // --- NOVA LÓGICA DE ENVIO (BREVO API) ---
                 using var httpClient = new HttpClient();
-                httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {resendApiKey}");
+                
+                // O Brevo usa um cabeçalho chamado 'api-key'
+                httpClient.DefaultRequestHeaders.Add("api-key", brevoApiKey);
+                httpClient.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
 
+                // Estrutura de dados exigida pelo Brevo
                 var emailData = new
                 {
-                    from = "MerendaChef <onboarding@resend.dev>", // Obrigatório no plano grátis
-                    to = new[] { usuario.Email }, // TEM de ser o teu email cadastrado no Resend para funcionar
+                    sender = new { name = "MerendaChef", email = "lucasds151@gmail.com" }, // TEM DE SER O TEU EMAIL REGISTADO NO BREVO
+                    to = new[] { new { email = usuario.Email, name = usuario.Nome } }, // AGORA PODE SER QUALQUER EMAIL DO MUNDO!
                     subject = "Recuperação de Senha - MerendaChef",
-                    html = $"<h2>Olá, {usuario.Nome}</h2><p>A sua senha provisória é: <b>{senhaProvisoria}</b></p><p>Ao iniciar sessão, deverá registar uma nova senha.</p>"
+                    htmlContent = $"<h2>Olá, {usuario.Nome}</h2><p>A sua senha provisória é: <b>{senhaProvisoria}</b></p><p>Ao iniciar sessão, deverá registar uma nova senha.</p>"
                 };
 
                 var content = new StringContent(JsonSerializer.Serialize(emailData), Encoding.UTF8, "application/json");
 
-                // Faz a chamada à API do Resend (Nunca é bloqueada pelo Render)
-                var resendResponse = await httpClient.PostAsync("https://api.resend.com/emails", content);
+                // Faz a chamada à API do Brevo
+                var brevoResponse = await httpClient.PostAsync("https://api.brevo.com/v3/smtp/email", content);
 
-                if (!resendResponse.IsSuccessStatusCode)
+                if (!brevoResponse.IsSuccessStatusCode)
                 {
-                    var erroResend = await resendResponse.Content.ReadAsStringAsync();
-                    Console.WriteLine($"Erro Resend: {erroResend}");
-                    return Results.Problem("Ocorreu um erro ao enviar o e-mail pela API do Resend.");
+                    var erroBrevo = await brevoResponse.Content.ReadAsStringAsync();
+                    Console.WriteLine($"Erro Brevo: {erroBrevo}");
+                    return Results.Problem("Ocorreu um erro ao enviar o e-mail pela API do Brevo.");
                 }
 
-                return Results.Ok("Uma senha provisória foi enviada para o seu e-mail.");
+                return Results.Ok("Uma senha provisória foi enviada para o seu e-mail registado.");
             }
             catch (Exception ex) 
             { 
@@ -89,7 +93,7 @@ public static class AuthEndpoints
             }
         });
 
-        // --- 3. NOVA ROTA: ALTERAR SENHA PROVISÓRIA ---
+        // --- 3. ROTA: ALTERAR SENHA PROVISÓRIA ---
         app.MapPost("/trocar-senha", async (Supabase.Client supabase, TrocarSenhaRequest request) =>
         {
             try
@@ -105,7 +109,7 @@ public static class AuthEndpoints
             catch (Exception ex) { return Results.Problem(ex.Message); }
         });
 
-        // --- 4. REGISTAR UTILIZADOR COMUM (ADMIN/PROFESSORES) ---
+        // --- 4. REGISTAR UTILIZADOR COMUM ---
         app.MapPost("/registrar-usuario", async (Supabase.Client supabase, RegistroRequest request) =>
         {
             try
