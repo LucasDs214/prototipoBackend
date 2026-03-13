@@ -1,6 +1,7 @@
 using PrototipoBackend.Config;
 using PrototipoBackend.Endpoints;
 
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Configuração do Supabase (Vindo da pasta Config)
@@ -21,5 +22,6 @@ app.UseCors();
 // Registrando as Rotas (Vindo da pasta Endpoints)
 app.MapAuthEndpoints();
 app.MapCandidatoEndpoints();
+app.MapReceitaEndpoints();
 
 app.Run();

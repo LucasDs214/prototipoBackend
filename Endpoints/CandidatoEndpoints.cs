@@ -14,7 +14,10 @@ public static class CandidatoEndpoints
             try
             {
                 var novoCandidato = new Candidato { Nome = request.Nome, Telefone = request.Telefone, Unidade = request.Unidade, Email = request.Email, FotoUrl = request.FotoUrl, Validado = false };
-                await supabase.From<Candidato>().Insert(novoCandidato);
+                
+                // ALTERAÇÃO 1: Capturar o resultado da inserção para obter o ID gerado pelo banco!
+                var response = await supabase.From<Candidato>().Insert(novoCandidato);
+                var candidatoInserido = response.Models.FirstOrDefault();
 
                 var mensagem = new MimeMessage();
                 mensagem.From.Add(new MailboxAddress("MerendaChef", "lucasds151@gmail.com"));
@@ -29,7 +32,16 @@ public static class CandidatoEndpoints
                 client.Send(mensagem);
                 client.Disconnect(true);
 
-                return Results.Ok("Candidato salvo e e-mail enviado!");
+                // ALTERAÇÃO 2: Retornar um objeto JSON contendo o ID do candidato!
+                if (candidatoInserido != null)
+                {
+                    return Results.Ok(new { 
+                        mensagem = "Candidato salvo e e-mail enviado!", 
+                        id = candidatoInserido.Id 
+                    });
+                }
+                
+                return Results.Problem("Candidato foi salvo, mas não foi possível recuperar o ID.");
             }
             catch (Exception ex) { return Results.Problem(ex.Message); }
         });
